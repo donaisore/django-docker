@@ -1,5 +1,7 @@
 mysql/
 .idea/
 .python-version
+
 django_docker/__pycache__/*
+__pycache__/
 
