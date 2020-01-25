@@ -9,11 +9,16 @@ class TaskGroupSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class TaskSerializer(serializers.ModelSerializer):
-    group_id = serializers.IntegerField(write_only=True)
+# class TaskSerializer(serializers.ModelSerializer):
+#     group_id = serializers.IntegerField(write_only=True)
+#
+#     class Meta:
+#         model = Task
+#         exclude = (
+#             'group',
+#         )
 
+class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
-        exclude = (
-            'group',
-        )
+        fields = '__all__'
