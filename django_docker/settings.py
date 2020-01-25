@@ -82,7 +82,10 @@ DATABASES = {
         'NAME': 'django_docker',
         'USER': 'root',
         'HOST': 'db',
-        'POST': 33306
+        'POST': 33306,
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+        }
     }
 }
 

@@ -14,6 +14,7 @@ services:
   db:
     container_name: django-docker-db
     image: mysql:5.7
+    command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     restart: always
     environment:
       MYSQL_DATABASE: django_docker
