@@ -12,7 +12,7 @@ class TaskGroupViewSet(viewsets.ModelViewSet):
 
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.all()
-    serializer_class = TaskGroupSerializer
+    serializer_class = TaskSerializer
 
 # class TaskViewSet(viewsets.ViewSet):
 #     def list(self, request, group_id):
