@@ -1,185 +1,35 @@
-## これは何
+## はじめに
 
-タイトルの通り
-`論理削除でも、関連テーブルのレコードを削除したい！`
+タイトルの通り Django を使っていて
 
-どうにかやれないかなぁという内容です。
+「論理削除でも、関連テーブルのレコードを削除したい！どうにかやれないかなぁ？」という内容です。
 
-CASCADE delete のことを書こうと思っていたにも関わらず、論理削除の実装から書いていたら長くなってしまいました。
-適当に興味のあるところだけ読み飛ばしていただけると助かります :pray:
+Django の論理削除の実装については色々な記事があるので割愛します。
 
-Django で以下のような Model を実装した時に
+サンプルとして、以下のように `Blog, Post, Comment` の三つの Model を用意し、全てを論理削除としました。
 
 ```python
 from django.db import models
-from django.contrib.auth.models import User
-
-class Blog(models.Model):
-    name = models.CharField(max_length=255)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+from django.db.models.manager import BaseManager
+from django.utils import timezone
 
 
-class Post(models.Model):
-    title = models.CharField(max_length=255)
-    description = models.TextField()
-    blog = models.ForeignKey(Blog, on_delete=models.CASCADE)
+class LogicalDeletionQuerySet(models.QuerySet):
+    def delete(self):
+        now = timezone.now()
+        return super().update(**{'deleted_at': now})
 
-```
 
-Blog のレコードを削除すると、削除したレコードに紐づいている
-Post のレコードも削除してくれます。
-
-(例)
-
-```python
->>> user = User.objects.create_user('user', 'user@example.com', 'user')
->>> blog = user.blog_set.create(name='blog')
->>> post = blog.post_set.create(title='post')
->>> Blog.objects.all(), Post.objects.all()
-(<QuerySet [<Blog: Blog object (1)>]>, <QuerySet [<Post: Post object (1)>]>)
->>> blog.delete()
-(2, {'blogs.Post': 1, 'blogs.Blog': 1})
->>> Blog.objects.all(), Post.objects.all()
-(<QuerySet []>, <QuerySet []>)
-```
-
-このようにいい感じに関連するレコードを一括で削除してくれる実装が出来ないものか考えてみました。
-
-また `models.ForeignKey()` の `on_delete`に渡せるものには
-
-- models.CASCADE
-- models.PROTECT
-- models.RESTRICT
-- models.SET(value)
-- models.SET_NULL
-- models.SET_DEFAULT
-- models.DO_NOTHING
-
-がありますが、ここでは `CASCADE` についてのみ考慮します！
-
-[django/GitHub](https://github.com/django/django/blob/main/django/db/models/deletion.py#L23-L67)
-
-## 目次(論理削除の実装でやりたいことの整理)
-
-1. `deleted_at` カラムを持ちたい
-2. `Model.objects.all()` で削除されたレコードが含まれない状態で取得したい
-3. `model_instance.delete()` で `deleted_at` に現在時刻を入れる
-4. `model_queryset.delete()` で `deleted_at` に現在時刻を入れる
-5. `model_instance.delete()` で 関連するレコードを削除する
-6. `model_queryset.delete()` で 関連するレコードを削除する
-7. 1~4 の内容を、継承すれば論理削除の実装が終了するクラスとして用意したい
-
-では一つずつ実装していきます！
-BlogModel に実装していきます
-
-## 1. `deleted_at` カラムを持ちたい
-
-ここは `deleted_at` カラムを持つだけなので、簡単です。
-
-**Before**
-
-```python
-class Blog(models.Model):
-    name = models.CharField(max_length=255)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-```
-
-**After**
-
-```python
-class Blog(models.Model):
-    name = models.CharField(max_length=255)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    deleted_at = models.DateTimeField(null=True, default=None)
-```
-
-`Blog.objects.filter(deleted_at__isnull=False)` で削除済みのレコードが含まれない queryset が取得できるようになりました。
-
-## 2. `Model.objects.all()` で削除されたレコードが含まれない状態で取得したい
-
-Blog のデータを取得するときに毎回 `.filter(deleted_at__isnull=False)` を書くのは現実的ではありません。
-
-- filter を書き忘れてしまった！
-- いちいち書くのが面倒という問題があります。
-
-こんな時には `Manager` を使います。
-
-[参考]
-
-- [Django ドキュメント/クエリを作成する/オブジェクトを取得する](https://docs.djangoproject.com/ja/3.2/topics/db/queries/#retrieving-objects)
-- [Django ドキュメント/マネージャー](https://docs.djangoproject.com/ja/3.2/topics/db/managers/)
-
-↑ にも書いてあるように、
-
-> `Manager.get_queryset()`メソッドをオーバーライドすることで、 `Manager`のベース`QuerySet`を上書きできます。
-
-では、CustomManager として `LogicalDeletionManager` を実装します。
-
-```python
-class LogicalDeletionManager(models.Manager):
+class LogicalDeletionManager(BaseManager.from_queryset(LogicalDeletionQuerySet)):
     def get_queryset(self):
         query_set = super().get_queryset()
         return query_set.filter(deleted_at__isnull=True)
 
-class Blog(models.Model):
-    name = models.CharField(max_length=255)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    deleted_at = models.DateTimeField(null=True, default=None)
 
-    objects = LogicalDeletionManager()
-    all_objects = models.Manager()
-```
+class LogicalDeletionModel(models.Model):
+    class Meta:
+        abstract = True
 
-削除されているものも含めて取得したいケースがあると思うので、 `all_objects` にデフォルトの `models.Manager()` を指定しています。
-
-ではどうなるか試してみます。
-
-```python
->>> Blog.objects.all()
-<QuerySet [<Blog: Blog object (1)>, <Blog: Blog object (2)>]>
->>> first_blog = Blog.objects.first()
->>> first_blog.deleted_at = timezone.now()
->>> first_blog.save()
->>> Blog.objects.all()
-<QuerySet [<Blog: Blog object (2)>]>
->>> user.blog_set.all()
-<QuerySet [<Blog: Blog object (2)>]>
->>> Blog.all_objects.all()
-<QuerySet [<Blog: Blog object (1)>, <Blog: Blog object (2)>]>
-```
-
-このように、論理削除されたレコードを含まない queryset を取得することが出来ました。
-
-## 3. `model_instance.delete()` で `deleted_at` に現在時刻を入れる
-
-2 の最後で書いたように、このままでは `deleted_at` を埋めるために、 save() をよぶ必要があります。
-
-**before**
-
-```python
->>> first_blog = Blog.objects.first()
->>> first_blog.deleted_at = timezone.now()
->>> first_blog.save()
-```
-
-本来は delete() で `deleted-at` に現在時刻が入るようになって欲しいです。
-
-↓ 目指す形
-
-```python
->>> first_blog = Blog.objects.first()
->>> first_blog.delete()
-```
-
-このために
-BlogModel の delete メソッドをオーバーライドします。
-
-```python
-from django.utils import timezone
-
-class Blog(models.Model):
-    name = models.CharField(max_length=255)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
     deleted_at = models.DateTimeField(null=True, default=None)
 
     objects = LogicalDeletionManager()
@@ -189,30 +39,212 @@ class Blog(models.Model):
         now = timezone.now()
         self.deleted_at = now
         self.save()
+
+
+class Blog(LogicalDeletionModel):
+    name = models.CharField(max_length=255)
+
+
+class Post(LogicalDeletionModel):
+    title = models.CharField(max_length=255)
+    content = models.TextField()
+    blog = models.ForeignKey(Blog, on_delete=models.CASCADE)
+
+
+class Comment(LogicalDeletionModel):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE)
+    content = models.TextField()
 ```
 
-実装が完了しました。
-では試してみます！
+この上で、`on_delete=models.CASCADE` の場合、紐づくレコードが全て削除されるように変更を加えていきます。
+
+**before**
+
+```
+>>> blog = Blog.objects.create(name='blog')
+>>> post = blog.post_set.create(title='post')
+>>> comment = post.comment_set.create(content='comment')
+>>> post.delete()
+>>> Post.objects.all()
+<LogicalDeletionQuerySet []>
+>>> Comment.objects.all()
+<QuerySet [<Comment: Comment object (1)>]>
+```
+
+## やること
+
+1. `model_instance.delete()` で `CASCADE DELETE`
+2. `model_queryset.delete()` で `CASCADE DELETE`
+
+## 1. `model_instance.delete()` で `CASCADE DELETE`
+
+まずは `LogicalDeletionModel` の `delete()` に修正を加えます。
+
+**before**
 
 ```python
->>> user = User.objects.create_user('user', 'user@example.com', 'user')
->>> blog1 = user.blog_set.create(name='blog1')
->>> blog2 = user.blog_set.create(name='blog2')
->>> Blog.objects.all()
-<QuerySet [<Blog: Blog object (1)>, <Blog: Blog object (2)>]>
->>> blog2.delete()
->>> Blog.objects.all()
-<QuerySet [<Blog: Blog object (1)>]>
->>> blog2.deleted_at
-datetime.datetime(2021, 6, 12, 7, 18, 54, 419027, tzinfo=<UTC>)
+class LogicalDeletionModel(models.Model):
+    def delete(self, **kwargs):
+        now = timezone.now()
+        self.deleted_at = now
+        self.save()
 ```
 
-完了です！
+これを実現するためには
 
-## 4. `model_queryset.delete()` で `deleted_at` に現在時刻を入れる
+- 削除されたインスタンスのモデルが ForeignKey として設定されているモデルの一覧
+- ForeignKey のフィールド名
+- ForeignKey の on_delete
 
-## 5. `model_instance.delete()` で 関連するレコードを削除する
+の全てが取得出来る必要があります。
 
-## 6. `model_queryset.delete()` で 関連するレコードを削除する
+それが完了すれば
+`Model.objects.filter(field_name=deleted_instance).delete()`
+とすることで実装が完了します。
 
-## 7. 1~4 の内容を、継承すれば論理削除の実装が終了するクラスとして用意したい
+まず
+削除されたインスタンスのモデルが ForeignKey として設定されているモデルの一覧は
+`instance._meta.related_objects` にアクセスすることで取得出来ました。
+
+```python
+>>> blog._meta.related_objects
+(<ManyToOneRel: blogs.post>,)
+>>> post._meta.related_objects
+(<ManyToOneRel: blogs.comment>,)
+>>> comment._meta.related_objects
+()
+```
+
+次にそのクラスを取得します。
+`instance._meta.related_objects` で取得出来たオブジェクトの
+`related_model` で取得出来ました。
+
+```
+>>> blog._meta.related_objects[0].related_model
+<class 'blogs.models.Post'>
+```
+
+フィールド名は `related_object` の `field.name`で取得出来ました。
+
+```python
+>>> blog._meta.related_objects[0].field.name
+'blog'
+```
+
+ForeignKey の on_delete は `related_object` の `on_delete`で取得できました。
+
+```python
+>>> blog._meta.related_objects[0].on_delete
+<function CASCADE at 0x7f8be5cbb830>
+```
+
+これらを使って `model_instance.delete()` での `CASCADE DELETE` を実装することができました。
+
+**after**
+
+```python
+class LogicalDeletionModel(models.Model):
+    def delete(self, **kwargs):
+        now = timezone.now()
+        self.deleted_at = now
+        self.save()
+        related_objects = self._meta.related_objects
+        for related_object in related_objects:
+            if related_object.on_delete == models.CASCADE:
+                related_model = related_object.related_model
+                related_field_name = related_object.field.name
+                related_model.objects.filter(**{related_field_name: self}).delete()
+```
+
+```python
+>>> blog = Blog.objects.create(name='blog')
+>>> post = blog.post_set.create(title='post')
+>>> comment1 = post.comment_set.create(content='comment1')
+>>> comment2 = post.comment_set.create(content='comment2')
+>>> post.delete()
+>>> Post.objects.all()
+<LogicalDeletionQuerySet []>
+>>> Comment.objects.all()
+<QuerySet []>
+```
+
+## 2. `model_queryset.delete()` で `CASCADE DELETE`
+
+こちらは
+
+- 削除された queryset のモデル
+- 削除された queryset のモデルが ForeignKey として設定されているモデルの一覧
+- ForeignKey のフィールド名
+- ForeignKey の on_delete
+
+を取得することで実装できます。
+
+削除された queryset のモデルは `queryset.model` で取得できます。
+
+```python
+>>> blogs = Blog.objects.all()
+>>> blogs.model
+<class 'blogs.models.Blog'>
+```
+
+ここからは 1 の `instance._meta` を `model._meta` に置き換えるだけで全く同じです。
+
+これを踏まえて `LogicalDeletionQuerySet` の delete の実装を更新します。
+
+**before**
+
+```python
+class LogicalDeletionQuerySet(models.QuerySet):
+    def delete(self):
+        now = timezone.now()
+        return super().update(**{'deleted_at': now})
+
+```
+
+**after**
+
+```python
+class LogicalDeletionQuerySet(models.QuerySet):
+    def delete(self):
+        queryset_model = self.model
+        related_objects = queryset_model._meta.related_objects
+        for related_object in related_objects:
+            if related_object.on_delete == models.CASCADE:
+                related_model = related_object.related_model
+                related_field_name = f'{related_object.field.name}__in'
+                related_model.objects.filter(**{related_field_name: self}).delete()
+
+        now = timezone.now()
+        return = super().update(**{'deleted_at': now})
+```
+
+では試してみます。
+
+```python
+>>> blog = Blog.objects.create(name='blog')
+>>> post = blog.post_set.create(title='post')
+>>> comment = post.comment_set.create(content='comment')
+>>> Blog.objects.all().delete()
+1
+>>> Blog.objects.all(), Post.objects.all(), Comment.objects.all()
+(<LogicalDeletionQuerySet []>, <LogicalDeletionQuerySet []>, <LogicalDeletionQuerySet []>)
+>>> Blog.all_objects.all(), Post.all_objects.all(), Comment.all_objects.all()
+(<QuerySet [<Blog: Blog object (1)>]>, <QuerySet [<Post: Post object (1)>]>, <QuerySet [<Comment: Comment object (1)>]>)
+```
+
+うまくいきました。
+
+## おわり
+
+少し強引に実装してしまったかな？と思ってはいますが
+
+> 「論理削除でも、関連テーブルのレコードを削除したい！」
+
+を実現することができました。
+
+より良い方法があれば是非教えてください！
+
+ありがとうございました！！
+
+ここに書いたソースコードはこちらにあげています
+https://github.com/donaisore/django-docker/tree/logical_deletion_cascade
