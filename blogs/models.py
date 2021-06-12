@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 
 class LogicalDeletionManager(models.Manager):
@@ -15,6 +16,10 @@ class Blog(models.Model):
     objects = LogicalDeletionManager()
     all_objects = models.Manager()
 
+    def delete(self, **kwargs):
+        now = timezone.now()
+        self.deleted_at = now
+        self.save()
 
 class Post(models.Model):
     title = models.CharField(max_length=255)
