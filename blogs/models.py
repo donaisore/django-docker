@@ -1,16 +1,24 @@
 from django.db import models
-from django.contrib.auth.models import User
+from django.db.models.manager import BaseManager
 from django.utils import timezone
 
 
-class LogicalDeletionManager(models.Manager):
+class LogicalDeletionQuerySet(models.QuerySet):
+    def delete(self):
+        now = timezone.now()
+        return super().update(**{'deleted_at': now})
+
+
+class LogicalDeletionManager(BaseManager.from_queryset(LogicalDeletionQuerySet)):
     def get_queryset(self):
         query_set = super().get_queryset()
         return query_set.filter(deleted_at__isnull=True)
 
-class Blog(models.Model):
-    name = models.CharField(max_length=255)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+
+class LogicalDeletionModel(models.Model):
+    class Meta:
+        abstract = True
+
     deleted_at = models.DateTimeField(null=True, default=None)
 
     objects = LogicalDeletionManager()
@@ -21,7 +29,16 @@ class Blog(models.Model):
         self.deleted_at = now
         self.save()
 
-class Post(models.Model):
+
+class Blog(LogicalDeletionModel):
+    name = models.CharField(max_length=255)
+
+
+class Post(LogicalDeletionModel):
     title = models.CharField(max_length=255)
     description = models.TextField()
     blog = models.ForeignKey(Blog, on_delete=models.CASCADE)
+
+
+class Comment(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE)
