@@ -244,4 +244,4 @@ class LogicalDeletionQuerySet(models.QuerySet):
 
 より良い方法があれば是非教えてください！
 
-ここまで読んでくださった方は、ありがとうございました！！
+ありがとうございました！！
