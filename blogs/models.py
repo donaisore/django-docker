@@ -5,6 +5,14 @@ from django.utils import timezone
 
 class LogicalDeletionQuerySet(models.QuerySet):
     def delete(self):
+        queryset_model = self.model
+        related_objects = queryset_model._meta.related_objects
+        for related_object in related_objects:
+            if related_object.on_delete == models.CASCADE:
+                related_model = related_object.related_model
+                related_field_name = f'{related_object.field.name}__in'
+                related_model.objects.filter(**{related_field_name: self}).delete()
+
         now = timezone.now()
         return super().update(**{'deleted_at': now})
 
@@ -28,6 +36,12 @@ class LogicalDeletionModel(models.Model):
         now = timezone.now()
         self.deleted_at = now
         self.save()
+        related_objects = self._meta.related_objects
+        for related_object in related_objects:
+            if related_object.on_delete == models.CASCADE:
+                related_model = related_object.related_model
+                related_field_name = related_object.field.name
+                related_model.objects.filter(**{related_field_name: self}).delete()
 
 
 class Blog(LogicalDeletionModel):
@@ -40,6 +54,6 @@ class Post(LogicalDeletionModel):
     blog = models.ForeignKey(Blog, on_delete=models.CASCADE)
 
 
-class Comment(models.Model):
+class Comment(LogicalDeletionModel):
     post = models.ForeignKey(Post, on_delete=models.CASCADE)
     content = models.TextField()
