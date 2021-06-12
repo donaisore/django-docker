@@ -80,9 +80,9 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'django_docker',
-        'USER': 'root',
+        'USER': 'django_docker',
+        'PASSWORD': 'django_docker',
         'HOST': 'db',
-        'POST': 33306,
         'OPTIONS': {
             'charset': 'utf8mb4',
         }

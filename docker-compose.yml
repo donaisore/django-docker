@@ -18,8 +18,9 @@ services:
     restart: always
     environment:
       MYSQL_DATABASE: django_docker
-      MYSQL_USER: root
-      MYSQL_PASSWORD: password
+      MYSQL_USER: django_docker
+      MYSQL_PASSWORD: django_docker
+      MYSQL_ROOT_PASSWORD: django_docker
       MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
     volumes:
       - ./mysql:/var/lib/mysql
