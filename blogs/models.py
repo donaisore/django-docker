@@ -36,9 +36,10 @@ class Blog(LogicalDeletionModel):
 
 class Post(LogicalDeletionModel):
     title = models.CharField(max_length=255)
-    description = models.TextField()
+    content = models.TextField()
     blog = models.ForeignKey(Blog, on_delete=models.CASCADE)
 
 
 class Comment(models.Model):
     post = models.ForeignKey(Post, on_delete=models.CASCADE)
+    content = models.TextField()
